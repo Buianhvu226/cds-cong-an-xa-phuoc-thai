@@ -32,7 +32,13 @@ db.init_app(app)
 migrate = Migrate(app, db)
 
 # CORS configuration
-CORS(app, origins=app.config['CORS_ORIGINS'], supports_credentials=True)
+CORS(
+    app, 
+    origins=app.config['CORS_ORIGINS'], 
+    supports_credentials=True,
+    allow_headers=['Content-Type', 'Authorization'],
+    methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH']
+)
 
 # Register blueprints
 app.register_blueprint(auth.bp, url_prefix='/api/auth')
