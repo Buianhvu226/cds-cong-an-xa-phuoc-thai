@@ -11,6 +11,7 @@ from openpyxl.styles import Font, Alignment, PatternFill
 from openpyxl.chart import PieChart, Reference
 from services.export_service import ExportService
 import os
+from sqlalchemy import or_, and_
 
 class ReportService:
     def __init__(self):
@@ -41,7 +42,8 @@ class ReportService:
             days = int(filters.get('days', 30)) if filters else 30
             return self._generate_inspection_due_report(days)
         elif report_type == 'expiring':
-            return self._generate_expiring_report()
+            days = int(filters.get('days', 30)) if filters else 30
+            return self._generate_expiring_report(days)
         else:
             raise ValueError(f"Invalid report type: {report_type}")
     
@@ -79,28 +81,43 @@ class ReportService:
         
         return {'type': 'inspection_due', 'days': days, 'data': all_assets}
     
-    def _generate_expiring_report(self):
-        """Generate report for expiring assets"""
-        current_year = datetime.now().year
-        
+    def _generate_expiring_report(self, days=30):
+        """
+        Generate report for expiring assets.
+        Theo yêu cầu nghiệp vụ: hiển thị toàn bộ tài sản trong hệ thống (kể cả chưa tới hạn),
+        đảm bảo người dùng nhìn tổng thể rồi dùng filter phụ (frontend) để đánh dấu cái sắp hết hạn.
+        """
+        today = date.today()
+        end_date = today + timedelta(days=days)
+
+        assets_by_type = self._collect_assets_by_type()
+        totals_by_type = {
+            asset_type: len(assets_by_type.get(asset_type, []))
+            for asset_type in self.type_order
+        }
+
         all_assets = []
-        
-        for asset_type, model_class in self.models.items():
-            assets = model_class.query.filter(
-                model_class.is_deleted == False,
-                model_class.nam_het_han.isnot(None),
-                model_class.nam_het_han <= current_year + 1
-            ).all()
-            
-            for asset in assets:
-                asset_dict = asset.to_dict()
-                asset_dict['asset_type'] = asset_type
-                all_assets.append(asset_dict)
-        
-        # Sort by expiration year
-        all_assets.sort(key=lambda x: x.get('nam_het_han', 9999))
-        
-        return {'type': 'expiring', 'data': all_assets}
+        for asset_type in self.type_order:
+            for asset in assets_by_type.get(asset_type, []):
+                asset_copy = dict(asset)
+                asset_copy['asset_type'] = asset_type
+                all_assets.append(asset_copy)
+
+        default_future = end_date + timedelta(days=3650)
+        all_assets.sort(
+            key=lambda x: (
+                self._parse_date(x.get('ngay_kiem_tra_tiep_theo')) or default_future,
+                x.get('nam_het_han') or 9999
+            )
+        )
+
+        return {
+            'type': 'expiring',
+            'days': days,
+            'total_assets': sum(totals_by_type.values()),
+            'by_type_totals': totals_by_type,
+            'data': all_assets
+        }
     
     def export_report(self, report_type, filters=None):
         """Export report to Excel"""

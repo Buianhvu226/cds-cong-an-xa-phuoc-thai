@@ -9,6 +9,7 @@ import pandas as pd
 import io
 import uuid
 from openpyxl.utils import get_column_letter
+from collections import Counter
 
 bp = Blueprint('tin_bao', __name__)
 
@@ -463,6 +464,52 @@ def import_tin_bao():
                 'error': f'Thiếu các cột bắt buộc: {", ".join(missing_columns)}'
             }), 400
 
+        # Pre-validate STT trong file để tránh trùng với dữ liệu hiện có
+        stt_map_by_row = {}
+        provided_stts = []
+        stt_errors = []
+        if 'STT' in df.columns:
+            for index, row in df.iterrows():
+                stt_raw = row.get('STT')
+                if pd.notna(stt_raw) and str(stt_raw).strip() != '':
+                    try:
+                        stt_int = int(float(stt_raw))
+                        stt_map_by_row[index] = stt_int
+                        provided_stts.append(stt_int)
+                    except ValueError:
+                        row_number = index + 2
+                        stt_errors.append(f"Dòng {row_number}: STT phải là số nguyên")
+
+        if stt_errors:
+            return jsonify({'error': 'STT không hợp lệ trong file import', 'details': stt_errors}), 400
+
+        duplicate_stts = [value for value, count in Counter(provided_stts).items() if count > 1]
+        if duplicate_stts:
+            duplicate_stts.sort()
+            return jsonify({
+                'error': 'Trùng STT ngay trong file import',
+                'conflict_stt': duplicate_stts,
+                'message': 'Mỗi tin báo phải có STT duy nhất. Vui lòng chỉnh sửa file trước khi import.'
+            }), 400
+
+        if provided_stts:
+            existing_conflicts = (
+                TinBao.query
+                .filter(TinBao.is_deleted == False, TinBao.stt.in_(provided_stts))
+                .with_entities(TinBao.stt)
+                .all()
+            )
+            if existing_conflicts:
+                conflict_values = sorted({stt for (stt,) in existing_conflicts})
+                return jsonify({
+                    'error': 'STT đã tồn tại trong hệ thống',
+                    'conflict_stt': conflict_values,
+                    'message': 'Vui lòng xóa các tin báo có STT này trong hệ thống trước khi import file Excel mới.'
+                }), 400
+
+        # Dọn sạch các bản ghi đã bị soft-delete để tránh chiếm STT
+        TinBao.query.filter_by(is_deleted=True).delete(synchronize_session=False)
+
         def parse_date_field(raw_value, label, row_number, allow_empty=False):
             if allow_empty and (pd.isna(raw_value) or str(raw_value).strip() == ''):
                 return None
@@ -531,23 +578,11 @@ def import_tin_bao():
         for index, row in df.iterrows():
             row_number = index + 2  # header = row 1
             try:
-                provided_stt = row.get('STT')
-                stt_value = None
-                if pd.notna(provided_stt) and str(provided_stt).strip() != '':
-                    try:
-                        provided_stt = int(provided_stt)
-                        existing = TinBao.query.filter_by(stt=provided_stt, is_deleted=False).first()
-                        if existing:
-                            errors.append(f"Dòng {row_number}: STT {provided_stt} đã tồn tại trong hệ thống")
-                            error_count += 1
-                            continue
-                        stt_value = provided_stt
-                        if provided_stt > max_stt:
-                            max_stt = provided_stt
-                    except ValueError:
-                        errors.append(f"Dòng {row_number}: STT phải là số nguyên")
-                        error_count += 1
-                        continue
+                provided_stt = stt_map_by_row.get(index)
+                if provided_stt is not None:
+                    stt_value = provided_stt
+                    if provided_stt > max_stt:
+                        max_stt = provided_stt
                 else:
                     max_stt += 1
                     stt_value = max_stt

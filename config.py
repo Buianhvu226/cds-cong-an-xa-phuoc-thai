@@ -22,10 +22,7 @@ class Config:
     FLASK_PORT = int(os.getenv('FLASK_PORT', 5000))
     
     # CORS
-    # Cho phép nhiều origins, phân cách bởi dấu phẩy
-    # Ví dụ: 'http://localhost:5173,https://phuocthai.hctech.com.vn'
-    cors_origins_str = os.getenv('CORS_ORIGINS', 'http://localhost:5173')
-    CORS_ORIGINS = [origin.strip() for origin in cors_origins_str.split(',') if origin.strip()]
+    CORS_ORIGINS = os.getenv('CORS_ORIGINS', 'http://localhost:5173').split(',')
     
     # JWT
     JWT_SECRET_KEY = os.getenv('JWT_SECRET_KEY', 'your-secret-key-change-in-production')

@@ -28,8 +28,6 @@ venv.bak/
 .env.local
 .env.*.local
 *.env
-# Keep .env.example for reference
-!.env.example
 
 # Database
 *.db
